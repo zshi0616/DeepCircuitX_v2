@@ -95,7 +95,7 @@ if __name__ == '__main__':
         x_data, level_list = circuit_utils.feature_gen_level(x_data, fanin_list, fanout_list)
         
         # No need to extract subcircuits for the first 10 levels
-        if len(level_list) <= 5:
+        if len(level_list) <= 5 or len(x_data) < size_range[1]:
             output_path = os.path.join(save_bench_path, '{}.bench').format(aig_name + '_0')
             region = list(range(len(x_data)))
             save_masked_circuit(region, output_path, x_data, fanin_list, fanout_list)
@@ -143,15 +143,17 @@ if __name__ == '__main__':
                 else:
                     print('[Warning] Repeated subcircuit')
             else:
-                print('[Warning] Failed to extract subcircuit')
+                print('[Warning] Failed to extract subcircuit: {}'.format(aig_name))
     
     # Convert to AIG 
+    no_sub_circuits = 0
     if not os.path.exists(save_aig_path):
         os.mkdir(save_aig_path)
     for bench_path in glob.glob(os.path.join(save_bench_path, '*.bench')):
+        no_sub_circuits += 1
         circuit_name = bench_path.split('/')[-1].split('.')[0]
         aig_path = os.path.join(save_aig_path, '{}.aig'.format(circuit_name))
         abc_cmd = 'abc -c "read_bench {}; strash; write_aiger {}"'.format(bench_path, aig_path)
         stdout, _ = run_command(abc_cmd)
         print('[INFO] Convert bench to aig: {}'.format(aig_path))
-        
+    print('[INFO] Total number of subcircuits: {}'.format(no_sub_circuits))
