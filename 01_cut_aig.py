@@ -4,14 +4,16 @@ import random
 import glob 
 import utils.aiger_utils as aiger_utils
 import utils.circuit_utils as circuit_utils
-from utils.utils import hash_arr
+from utils.utils import hash_arr, run_command
 
 gate_to_index = {'PI': 0, 'AND': 1, 'NOT': 2}
-save_path = './data/sub_bench'
+save_bench_path = './data/sub_bench'
+save_aig_path = './data/sub_aig'
 
+################################ Subcircuit Extraction ################################
 size_range = [1000, 3000, 15000]        # min_size in range [a, b], max_size < c
-level_range = [5, 20]
-no_circuits = 100
+level_range = [5, 20]                   # min_level, max_level 
+no_circuits = 100                       # number of subcircuits to extract
 
 def save_masked_circuit(region, bench_path, x_data, fanin_list, fanout_list):
     new_PI = []
@@ -83,8 +85,8 @@ def dfs_fanin_region(po_idx, stop_level, region, x_data, fanin_list):
         region += tmp_region
     
 if __name__ == '__main__':
-    if not os.path.exists(save_path):
-        os.mkdir(save_path)
+    if not os.path.exists(save_bench_path):
+        os.mkdir(save_bench_path)
         
     for aig_path in glob.glob('./data/raw_aig/*.aig'):
         aig_name = aig_path.split('/')[-1].split('.')[0]
@@ -94,7 +96,7 @@ if __name__ == '__main__':
         
         # No need to extract subcircuits for the first 10 levels
         if len(level_list) <= 5:
-            output_path = os.path.join(save_path, '{}.bench').format(aig_name + '_0')
+            output_path = os.path.join(save_bench_path, '{}.bench').format(aig_name + '_0')
             region = list(range(len(x_data)))
             save_masked_circuit(region, output_path, x_data, fanin_list, fanout_list)
             continue
@@ -105,7 +107,7 @@ if __name__ == '__main__':
         subcircuit_exist = {}
         circuit_idx = 0
         for try_times in range(0, no_circuits):
-            output_path = os.path.join(save_path, '{}.bench').format(aig_name + '_{}'.format(circuit_idx))
+            output_path = os.path.join(save_bench_path, '{}.bench').format(aig_name + '_{}'.format(circuit_idx))
             po_level = random.randint(5, len(level_list) - 1)
             stop_level = max(0, po_level - random.randint(min_level, max_level))
             res_region = []
@@ -142,3 +144,14 @@ if __name__ == '__main__':
                     print('[Warning] Repeated subcircuit')
             else:
                 print('[Warning] Failed to extract subcircuit')
+    
+    # Convert to AIG 
+    if not os.path.exists(save_aig_path):
+        os.mkdir(save_aig_path)
+    for bench_path in glob.glob(os.path.join(save_bench_path, '*.bench')):
+        circuit_name = bench_path.split('/')[-1].split('.')[0]
+        aig_path = os.path.join(save_aig_path, '{}.aig'.format(circuit_name))
+        abc_cmd = 'abc -c "read_bench {}; strash; write_aiger {}"'.format(bench_path, aig_path)
+        stdout, _ = run_command(abc_cmd)
+        print('[INFO] Convert bench to aig: {}'.format(aig_path))
+        
