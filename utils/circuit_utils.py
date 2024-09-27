@@ -1032,40 +1032,11 @@ def feature_gen_connect(data, gate_to_index):
     
     return x_data, edge_index_data
 
-def feature_gen_level(x_data, fanout_list, gate_to_index):
-    bfs_q = []
-    x_data_level = [-1] * len(x_data)
-    max_level = 0
-    for idx, x_data_info in enumerate(x_data):
-        if x_data_info[1] == gate_to_index['PI'] or x_data_info[1] == gate_to_index['DFF'] or x_data_info[1] == gate_to_index['LATCH']:
-            bfs_q.append(idx)
-            x_data_level[idx] = 0
-    while len(bfs_q) > 0:
-        idx = bfs_q.pop(0)
-        tmp_level = x_data_level[idx] + 1
-        for next_node in fanout_list[idx]:
-            if x_data[next_node][1] == gate_to_index['DFF'] or x_data[next_node][1] == gate_to_index['LATCH']:
-                continue
-            if x_data_level[next_node] < tmp_level:
-                x_data_level[next_node] = tmp_level
-                bfs_q.append(next_node)
-                if x_data_level[next_node] > max_level:
-                    max_level = x_data_level[next_node]
-    level_list = []
-    for level in range(max_level+1):
-        level_list.append([])
-    
-    for idx, x_data_info in enumerate(x_data):
-        if x_data_level[idx] == -1:
-            print('[ERROR] Find unconnected node')
-            raise
-
-    if max_level == 0:
-        level_list = [[]]
-    else:
-        for idx in range(len(x_data)):
-            level_list[x_data_level[idx]].append(idx)
-            x_data[idx].append(x_data_level[idx])
+def feature_gen_level(x_data, fanin_list, fanout_list):
+    level_list = get_level(x_data, fanin_list, fanout_list)
+    for level, nodes in enumerate(level_list):
+        for node in nodes:
+            x_data[node].append(level)
     return x_data, level_list
 
 def parse_bench(file, gate_to_index={'PI': 0, 'AND': 1, 'NOT': 2}, MAX_LENGTH=-1):
