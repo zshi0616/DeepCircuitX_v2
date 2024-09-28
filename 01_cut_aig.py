@@ -88,14 +88,20 @@ if __name__ == '__main__':
     if not os.path.exists(save_bench_path):
         os.mkdir(save_bench_path)
         
-    for aig_path in glob.glob('./data/raw_aig/*.aig'):
+    all_aig_list = glob.glob('./data/raw_aig/*.aig')
+        
+    for aig_k, aig_path in enumerate(all_aig_list):
+        print('[INFO] {} / {}, Parsing {}'.format(aig_k, len(all_aig_list), aig_path))
         aig_name = aig_path.split('/')[-1].split('.')[0]
         x_data, edge_index = aiger_utils.aig_to_xdata(aig_path)
         fanin_list, fanout_list = circuit_utils.get_fanin_fanout(x_data, edge_index)
         x_data, level_list = circuit_utils.feature_gen_level(x_data, fanin_list, fanout_list)
         
+        if len(x_data) < size_range[0]:
+            continue
+        
         # No need to extract subcircuits for the first 10 levels
-        if len(level_list) <= 5 or len(x_data) < size_range[1]:
+        if len(level_list) <= 5 or len(x_data) < size_range[2]:
             output_path = os.path.join(save_bench_path, '{}.bench').format(aig_name + '_0')
             region = list(range(len(x_data)))
             save_masked_circuit(region, output_path, x_data, fanin_list, fanout_list)
@@ -144,6 +150,10 @@ if __name__ == '__main__':
                     print('[Warning] Repeated subcircuit')
             else:
                 print('[Warning] Failed to extract subcircuit: {}'.format(aig_name))
+        if circuit_idx == 0:
+            print('[ERROR] No subcircuits are extracted !!! ')
+            print('Check: {}'.format(aig_path))
+            exit()
     
     # Convert to AIG 
     no_sub_circuits = 0
