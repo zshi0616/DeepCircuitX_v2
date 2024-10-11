@@ -6,7 +6,7 @@ Author: Sadaf Khan, Zhengyuan Shi and Min Li.
 # import torch
 from numpy.random import randint
 import copy
-from collections import Counter
+from collections import Counter, deque, defaultdict
 import random 
 import torch
 import os 
@@ -16,6 +16,68 @@ from utils.utils import hash_arr, run_command
 import deepgate as dg
 import time
 import threading
+
+PO_KEYS = ['.X', '.Y', '.ZN']
+CELL_KEYS = PO_KEYS + ['.A', '.B', '.C']
+
+def seq_to_comb(x_data, fanin_list, ff_keys=[]): 
+    for idx, x_data_info in enumerate(x_data):
+        is_ff = False
+        for key in ff_keys:
+            if key in x_data_info[1]:
+                is_ff = True
+                break
+        if is_ff:
+            fanin_list[idx] = []
+            x_data[idx][1] = 'PI'
+    edge_index = []
+    fanout_list = []
+    for idx, x_data_info in enumerate(x_data):
+        fanout_list.append([])
+    for idx, x_data_info in enumerate(x_data):
+        for fanin in fanin_list[idx]:
+            edge_index.append([fanin, idx])
+            fanout_list[fanin].append(idx)
+    return x_data, edge_index, fanin_list, fanout_list
+
+def find_loop(fanout_list):
+    num_nodes = len(fanout_list)
+    indegree = [0] * num_nodes
+    predecessor = defaultdict(list)
+    
+    for node in range(num_nodes):
+        for neighbor in fanout_list[node]:
+            indegree[neighbor] += 1
+            predecessor[neighbor].append(node)
+    
+    queue = deque([node for node in range(num_nodes) if indegree[node] == 0])
+    processed_count = 0
+    path = []
+
+    while queue:
+        node = queue.popleft()
+        processed_count += 1
+        path.append(node)
+        for neighbor in fanout_list[node]:
+            indegree[neighbor] -= 1
+            if indegree[neighbor] == 0:
+                queue.append(neighbor)
+    
+    if processed_count == num_nodes:
+        return []  # 无环
+    else:
+        return path
+
+    # 找到一个环，构建环的路径
+    for node in range(num_nodes):
+        if indegree[node] > 0:
+            cycle = []
+            while node not in cycle:
+                cycle.append(node)
+                node = predecessor[node][0]
+            cycle.reverse()
+            return cycle
+
 
 def remove_unconnected(x_data, edge_index):
     new_x_data = []
@@ -1659,4 +1721,152 @@ def get_hops(idx, edge_index, x_data, gate, k_hop=4):
     hop_pos = hop_nodes[(hop_forward_level!=0) & (hop_backward_level==0)]
     
     return hop_nodes, hop_gates, hop_pis, hop_pos
- 
+
+
+def parse_genlib(genlib_path):
+    f = open(genlib_path, 'r')
+    lines = f.readlines()
+    f.close()
+    
+    cell_dict = {}
+    for line in lines:
+        arr = line.replace('\n', '').replace(' ', '').split(',')
+        cell = {}
+        cell['name'] = arr[0]
+        cell['expr'] = arr[1]
+        cell['tt'] = arr[2]
+        cell['area'] = arr[3]
+        cell['pin_delay'] = arr[4:]
+        cell_dict[cell['name']] = cell
+    
+    return cell_dict
+
+def parse_v(v_path):
+    f = open(v_path, 'r')
+    lines = f.readlines()
+    f.close()
+    
+    x_data = []
+    fanin_list = []
+    fanout_list = []
+    PI_index = []
+    PO_index = []
+    name2idx = {}
+    cellname_list = []
+    
+    tp = 0
+    while tp < len(lines):
+        line = lines[tp]
+        if line.lstrip()[:2] == '//':
+            tp += 1
+            continue
+        # Parse input 
+        if 'input' in line:
+            input_txt = ''
+            while ';' not in line:
+                input_txt += line.replace('\n', '')
+                tp += 1
+                line = lines[tp]
+            input_txt += lines[tp].replace('\n', '')
+            input_txt = input_txt.replace('\n', '').replace('input', '').replace(';', '').replace(' ', '')
+            input_arr = input_txt.split(',')
+            for pi_name in input_arr:
+                name2idx[pi_name] = len(x_data)
+                PI_index.append(len(x_data))
+                x_data.append([pi_name, '_PI'])
+                cellname_list.append('PI')
+                fanin_list.append([])
+                fanout_list.append([])
+        
+        # Parse output
+        if 'output' in line:
+            output_txt = ''
+            while ';' not in line:
+                output_txt += line.replace('\n', '')
+                tp += 1
+                line = lines[tp]
+            output_txt += lines[tp].replace('\n', '')
+            output_txt = output_txt.replace('\n', '').replace('output', '').replace(';', '').replace(' ', '')
+            output_arr = output_txt.split(',')
+            for po_name in output_arr:
+                name2idx[po_name] = len(x_data)
+                PO_index.append(len(x_data))
+                x_data.append([po_name, '_PO'])
+                cellname_list.append('PO')
+                fanin_list.append([])
+                fanout_list.append([])
+        
+        # Parse wire 
+        if 'wire' in line:
+            wire_txt = ''
+            while ';' not in line:
+                wire_txt += line.replace('\n', '')
+                tp += 1
+                line = lines[tp]
+            wire_txt += lines[tp].replace('\n', '')
+            wire_txt = wire_txt.replace('\n', '').replace('wire', '').replace(';', '').replace(' ', '')
+            wire_arr = wire_txt.split(',')
+            for wire_name in wire_arr:
+                name2idx[wire_name] = len(x_data)
+                x_data.append([wire_name, '_WIRE'])
+                cellname_list.append('WIRE')
+                fanin_list.append([])
+                fanout_list.append([])
+        
+        # Cells 
+        find_cell_key = False
+        for cell_key in CELL_KEYS:
+            if cell_key in line:
+                find_cell_key = True
+                break
+        if find_cell_key:
+            line = line.lstrip().replace('\n', '')
+            while ';' not in line:
+                tp += 1
+                line += lines[tp].lstrip().replace('\n', '')
+            
+            cell_type = line.split(' ')[0]
+            cell_name = line.split(' ')[1]
+            # Find the cell instantiation
+            left_idx = -1
+            right_idx = -1
+            for txt_idx in range(len(line)):
+                if left_idx == -1 and line[txt_idx] == '(':
+                    left_idx = txt_idx
+                if line[txt_idx] == ')':
+                    right_idx = txt_idx
+            cell_txt = line[left_idx+1:right_idx]
+            cell_txt = cell_txt.replace(' ', '')
+            arr = cell_txt.split(',')
+            # Parse cell txt
+            fi_list = []
+            for ele in arr:
+                find_cell_key = False
+                for cell_key in PO_KEYS:
+                    if cell_key in ele:
+                        find_cell_key = True
+                        break
+                if find_cell_key:
+                    pin_name = ele.split('(')[-1].split(')')[0]
+                    fo_idx = name2idx[pin_name]
+                else:
+                    pin_name = ele.split('(')[-1].split(')')[0]
+                    fi_idx = name2idx[pin_name]
+                    fi_list.append(fi_idx)
+            # Save to x_data 
+            x_data[fo_idx][1] = cell_type
+            fanin_list[fo_idx] = fi_list
+            for fi_idx in fi_list:
+                fanout_list[fi_idx].append(fo_idx)
+            cellname_list[fo_idx] = cell_name
+        
+        # Constraint
+        if 'assign' in line:
+            arr = line.replace('assign', '').replace('\n', '').replace(' ', '').split('=')
+            fo_idx = name2idx[arr[0]]
+            value = 0 if '0' in arr[1] else 1
+            x_data[fo_idx][1] = 'C{}'.format(value)
+                                
+        tp += 1
+    
+    return x_data, fanin_list, fanout_list, PI_index, PO_index, cellname_list
