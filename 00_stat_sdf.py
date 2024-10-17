@@ -13,29 +13,29 @@ from utils.utils import run_command, hash_arr
 from parse_graph import parse_sdf
 import utils.circuit_utils as circuit_utils
 
-raw_dir = './data/raw_data'
-# genlib_path = 'genlib/sky130.csv'
+raw_dir = './data/output_riscv_diffModule2'
 genlib_path = './genlib/sky130.csv'
 
 ff_keys = ['dfrtp','sky130_fd_sc_hd__edfxtp_1', 'dfrtn', 'dfxtp', 'dfbbn', 'dlrtp', 'einvn', 'dlxtp', 'dfsbp', 'dfstp', 'edfxbp']
 
 if __name__ == '__main__':
     cell_dict = circuit_utils.parse_genlib(genlib_path)
-    sdf_list = glob.glob(os.path.join(raw_dir, '*/*.sdf'))
+    sdf_list = glob.glob(os.path.join(raw_dir, '*/*/*.sdf'))
     tot_time = 0
     graphs = {}
     f = open('stat_sdf.csv', 'w')
-    f.write("Circuit,Succ,Input,Output,FFs,Nds,Lev\n")
+    f.write("Design,Module,Succ,Input,Output,FFs,Nds,Lev\n")
     
     for sdf_k, sdf_path in enumerate(sdf_list):
-        # if 'RISC16BitProcessor' not in sdf_path:
-        #     continue
+        arr = sdf_path.replace('.sdf', '').split('/')
+        design_name = arr[-3]
+        module_name = arr[-2]
+        circuit_name = '{}/{}'.format(design_name, module_name)
         
         start_time = time.time()
-        circuit_name = sdf_path.split('/')[-2]
         if not os.path.exists(sdf_path):
-            f.write('{},{},{},{},{},{},{}\n'.format(
-                circuit_name, 0, 0, 0, 0, 0, 0
+            f.write('{},{},{},{},{},{},{},{}\n'.format(
+                design_name, module_name, 0, 0, 0, 0, 0, 0
             ))
             continue
         
@@ -43,8 +43,8 @@ if __name__ == '__main__':
         x_data, edge_index, fanin_list, fanout_list = parse_sdf(sdf_path)
         
         if len(x_data) == 0:
-            f.write('{},{},{},{},{},{},{}\n'.format(
-                circuit_name, 0, 0, 0, 0, 0, 0
+            f.write('{},{},{},{},{},{},{},{}\n'.format(
+                design_name,module_name, 0, 0, 0, 0, 0, 0
             ))
             continue
             
@@ -64,8 +64,8 @@ if __name__ == '__main__':
             if is_ff:
                 no_ff += 1
             
-        f.write('{},{},{},{},{},{},{}\n'.format(
-            circuit_name, 1, no_pi, no_po, no_ff, len(x_data), 0
+        f.write('{},{},{},{},{},{},{},{}\n'.format(
+            design_name, module_name, 1, no_pi, no_po, no_ff, len(x_data), 0
         ))
         
         # Statistics
